@@ -1,0 +1,44 @@
+name: Compilar Windows-SQL Monitor (.exe)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Instalar Tauri CLI
+        run: cargo install tauri-cli --version "^2.0"
+      - name: Preparar iconos de la aplicación
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/icons | Out-Null
+          Add-Type -AssemblyName System.Drawing
+          $src = if (Test-Path "src-tauri/icons/app-icon-source.png") { "src-tauri/icons/app-icon-source.png" } elseif (Test-Path "src-tauri/icons/app-icon-source.jpg") { "src-tauri/icons/app-icon-source.jpg" } else { $null }
+          if ($src) {
+            $img = [System.Drawing.Image]::FromFile((Resolve-Path $src))
+            $bmp = New-Object System.Drawing.Bitmap(512, 512, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.Clear([System.Drawing.Color]::Transparent)
+            $g.DrawImage($img, 0, 0, 512, 512)
+            $g.Dispose()
+            $bmp.Save("src-tauri/icons/app-icon-clean.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose(); $img.Dispose()
+            Copy-Item "src-tauri/icons/app-icon-clean.png" "ui/app-icon.png" -Force
+            cargo tauri icon "src-tauri/icons/app-icon-clean.png"
+          }
+      - name: Compilar instalador NSIS (.exe)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          args: --bundles nsis
+      - name: Publicar artefacto Setup.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-SQL-Monitor-Installer-EXE
+          path: src-tauri/target/release/bundle/nsis/*.exe
