@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # Permite ejecutarlo manualmente desde la web
   push:
     tags:
-      - 'v*' # Solo se ejecuta al subir un tag que empiece por "v" (ej. v1.2.0)
+      - 'v*' # Solo se ejecuta al subir un tag que empiece por "v" (ej. v1.2.1)
 
 permissions:
   contents: write # Permiso obligatorio para que GitHub Actions pueda crear el Release

@@ -1,6 +1,6 @@
 # Windows-SQL Monitor
 
-**Versión 1.2.0 (2026)** · Aplicación de escritorio ligera en **Rust + Tauri v2** para monitorizar en tiempo real hasta **3 servidores Windows Server y SQL Server** desde la bandeja del sistema (*System Tray*).
+**Versión 1.2.1 (2026)** · Aplicación de escritorio ligera en **Rust + Tauri v2** para monitorizar en tiempo real hasta **3 servidores Windows Server y SQL Server** desde la bandeja del sistema (*System Tray*).
 
 ---
 
@@ -46,7 +46,7 @@ Ejecuta en PowerShell dentro de la raíz del proyecto:
 El instalador final se generará en:
 
 ```text
-src-tauri\target\release\bundle\nsis\Windows-SQL Monitor_1.2.0_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Windows-SQL Monitor_1.2.1_x64-setup.exe
 ```
 
 ---
@@ -57,11 +57,11 @@ El repositorio incluye el workflow [`.github/workflows/build-windows-exe.yml`](.
 
 1. Sube una etiqueta (*tag*) con la versión:
    ```bash
-   git tag v1.2.0
-   git push origin v1.2.0
+   git tag v1.2.1
+   git push origin v1.2.1
    ```
 2. O ejecútalo manualmente desde la pestaña **Actions → Compilar Windows-SQL Monitor (.exe) → Run workflow**.
-3. GitHub Actions compilará el instalador en `windows-latest` y creará automáticamente un **Release en borrador (Draft)** con `Windows-SQL Monitor_1.2.0_x64-setup.exe` adjunto, listo para revisar y publicar.
+3. GitHub Actions compilará el instalador en `windows-latest` y creará automáticamente un **Release en borrador (Draft)** con `Windows-SQL Monitor_1.2.1_x64-setup.exe` adjunto, listo para revisar y publicar.
 
 ---
 
@@ -112,7 +112,7 @@ El repositorio incluye el workflow [`.github/workflows/build-windows-exe.yml`](.
 ## Autor y créditos
 
 - **Aplicación:** Windows-SQL Monitor
-- **Versión:** 1.2.0 (2026)
+- **Versión:** 1.2.1 (2026)
 - **Autor:** William Jiménez Puentes
 - **Correo:** willjp93@gmail.com
 - **GitHub:** https://github.com/willljp93
