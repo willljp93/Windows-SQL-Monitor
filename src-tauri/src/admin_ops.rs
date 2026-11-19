@@ -80,12 +80,13 @@ pub async fn diagnose_ports(host: String, sql_port: u16, timeout_ms: u64) -> Vec
 }
 
 #[cfg(windows)]
-fn run_powershell_with_cred(
+fn run_powershell_with_env(
     host: &str,
     domain: &str,
     username: &str,
     password: &str,
     script: &str,
+    extra_env: &[(&str, &str)],
 ) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
@@ -98,22 +99,57 @@ fn run_powershell_with_cred(
     };
     let local_flag = if is_local_host(host) { "1" } else { "0" };
 
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("VERSAT_WIN_HOST", host)
         .env("VERSAT_WIN_USER", &full_user)
         .env("VERSAT_WIN_PASS", password)
-        .env("VERSAT_IS_LOCAL", local_flag)
+        .env("VERSAT_IS_LOCAL", local_flag);
+
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+
+    let output = cmd
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("No se pudo ejecutar PowerShell: {}", e))?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(err.trim().to_string());
+        let out = String::from_utf8_lossy(&output.stdout);
+        let combined = if err.trim().is_empty() {
+            out.trim().to_string()
+        } else {
+            err.trim().to_string()
+        };
+        return Err(combined);
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(windows)]
+fn run_powershell_with_cred(
+    host: &str,
+    domain: &str,
+    username: &str,
+    password: &str,
+    script: &str,
+) -> Result<String, String> {
+    run_powershell_with_env(host, domain, username, password, script, &[])
+}
+
+#[cfg(not(windows))]
+fn run_powershell_with_env(
+    _host: &str,
+    _domain: &str,
+    _username: &str,
+    _password: &str,
+    _script: &str,
+    _extra_env: &[(&str, &str)],
+) -> Result<String, String> {
+    Err("Operación administrativa remota disponible únicamente en Windows".to_string())
 }
 
 #[cfg(not(windows))]
@@ -316,6 +352,247 @@ if ($env:VERSAT_IS_LOCAL -eq '1') {{
     }
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct SqlServiceInfo {
+    pub role: String,
+    pub title: String,
+    pub service_name: String,
+    pub display_name: String,
+    pub status: String,
+    pub start_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SqlServicesSnapshot {
+    pub ok: bool,
+    pub detected_instance: String,
+    pub detail: String,
+    pub services: Vec<SqlServiceInfo>,
+}
+
+fn build_fallback_services(preferred_service: &str, sql_instance: &str) -> (String, Vec<SqlServiceInfo>) {
+    let inst_trim = sql_instance.trim();
+    let svc_trim = preferred_service.trim();
+    let mut inst = String::new();
+    if !inst_trim.is_empty() && !inst_trim.eq_ignore_ascii_case("MSSQLSERVER") {
+        inst = inst_trim.to_string();
+    } else if let Some(rest) = svc_trim.strip_prefix("MSSQL$") {
+        if !rest.is_empty() {
+            inst = rest.to_string();
+        }
+    } else if let Some(rest) = svc_trim.strip_prefix("SQLAgent$") {
+        if !rest.is_empty() {
+            inst = rest.to_string();
+        }
+    }
+
+    let engine_name = if !inst.is_empty() {
+        format!("MSSQL{}{}", "$", inst)
+    } else if !svc_trim.is_empty() {
+        svc_trim.to_string()
+    } else {
+        "MSSQLSERVER".to_string()
+    };
+    let agent_name = if !inst.is_empty() {
+        format!("SQLAgent{}{}", "$", inst)
+    } else {
+        "SQLSERVERAGENT".to_string()
+    };
+
+    let list = vec![
+        SqlServiceInfo {
+            role: "engine".to_string(),
+            title: "Motor SQL Server".to_string(),
+            service_name: engine_name,
+            display_name: if inst.is_empty() {
+                "SQL Server (MSSQLSERVER)".to_string()
+            } else {
+                format!("SQL Server ({})", inst)
+            },
+            status: "Unknown".to_string(),
+            start_type: String::new(),
+        },
+        SqlServiceInfo {
+            role: "agent".to_string(),
+            title: "Agente SQL Server".to_string(),
+            service_name: agent_name,
+            display_name: if inst.is_empty() {
+                "SQL Server Agent (MSSQLSERVER)".to_string()
+            } else {
+                format!("SQL Server Agent ({})", inst)
+            },
+            status: "Unknown".to_string(),
+            start_type: String::new(),
+        },
+        SqlServiceInfo {
+            role: "browser".to_string(),
+            title: "SQL Server Browser".to_string(),
+            service_name: "SQLBrowser".to_string(),
+            display_name: "SQL Server Browser".to_string(),
+            status: "Unknown".to_string(),
+            start_type: String::new(),
+        },
+    ];
+    (inst, list)
+}
+
+pub async fn list_sql_services(
+    host: String,
+    domain: String,
+    username: String,
+    password: String,
+    preferred_service: String,
+    sql_instance: String,
+) -> SqlServicesSnapshot {
+    let (fallback_inst, fallback_list) = build_fallback_services(&preferred_service, &sql_instance);
+    if !is_local_host(&host) && (username.trim().is_empty() || password.is_empty()) {
+        return SqlServicesSnapshot {
+            ok: false,
+            detected_instance: fallback_inst,
+            detail: "Configura usuario y contraseña de Windows Server para consultar el estado real de los 3 servicios.".to_string(),
+            services: fallback_list,
+        };
+    }
+
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$prefSvc = $env:VERSAT_PREF_SVC
+$prefInst = $env:VERSAT_PREF_INST
+$sb = {
+  param($pSvc, $pInst)
+  $all = @(Get-Service -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' -or
+    $_.Name -eq 'SQLSERVERAGENT' -or $_.Name -like 'SQLAgent$*' -or
+    $_.Name -eq 'SQLBrowser' -or ($pSvc -and $_.Name -ieq $pSvc)
+  })
+  $engines = @($all | Where-Object { $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' -or ($pSvc -and $_.Name -ieq $pSvc) })
+
+  $inst = ''
+  if ($pInst -and -not ($pInst -ieq 'MSSQLSERVER')) {
+    $inst = $pInst.Trim()
+  } elseif ($pSvc -match '^MSSQL\$(.+)$') {
+    $inst = $Matches[1]
+  } elseif ($pSvc -match '^SQLAgent\$(.+)$') {
+    $inst = $Matches[1]
+  }
+
+  $engObj = $null
+  if ($inst) {
+    $targetEng = 'MSSQL$' + $inst
+    $engObj = $engines | Where-Object { $_.Name -ieq $targetEng } | Select-Object -First 1
+  }
+  if (-not $engObj -and $pSvc) {
+    $engObj = $engines | Where-Object { $_.Name -ieq $pSvc } | Select-Object -First 1
+  }
+  if (-not $engObj) {
+    $engObj = $engines | Select-Object -First 1
+  }
+
+  $resolvedInst = $inst
+  if ($engObj -and $engObj.Name -match '^MSSQL\$(.+)$') {
+    $resolvedInst = $Matches[1]
+  } elseif ($engObj -and $engObj.Name -ieq 'MSSQLSERVER') {
+    $resolvedInst = ''
+  }
+
+  $engName = if ($engObj) { $engObj.Name } elseif ($resolvedInst) { 'MSSQL$' + $resolvedInst } elseif ($pSvc) { $pSvc } else { 'MSSQLSERVER' }
+  $agtName = if ($resolvedInst) { 'SQLAgent$' + $resolvedInst } else { 'SQLSERVERAGENT' }
+  $agtObj = $all | Where-Object { $_.Name -ieq $agtName } | Select-Object -First 1
+  if (-not $agtObj) {
+    $agtObj = $all | Where-Object { $_.Name -eq 'SQLSERVERAGENT' -or $_.Name -like 'SQLAgent$*' } | Select-Object -First 1
+    if ($agtObj) { $agtName = $agtObj.Name }
+  }
+  $brwObj = $all | Where-Object { $_.Name -ieq 'SQLBrowser' } | Select-Object -First 1
+
+  $rows = @(
+    [PSCustomObject]@{
+      role = 'engine'
+      title = 'Motor SQL Server'
+      service_name = $engName
+      display_name = if ($engObj) { $engObj.DisplayName } else { 'SQL Server (no encontrado)' }
+      status = if ($engObj) { $engObj.Status.ToString() } else { 'NotFound' }
+      start_type = if ($engObj -and $engObj.PSObject.Properties['StartType']) { $engObj.StartType.ToString() } else { '' }
+    },
+    [PSCustomObject]@{
+      role = 'agent'
+      title = 'Agente SQL Server'
+      service_name = $agtName
+      display_name = if ($agtObj) { $agtObj.DisplayName } else { 'SQL Server Agent (no encontrado)' }
+      status = if ($agtObj) { $agtObj.Status.ToString() } else { 'NotFound' }
+      start_type = if ($agtObj -and $agtObj.PSObject.Properties['StartType']) { $agtObj.StartType.ToString() } else { '' }
+    },
+    [PSCustomObject]@{
+      role = 'browser'
+      title = 'SQL Server Browser'
+      service_name = 'SQLBrowser'
+      display_name = if ($brwObj) { $brwObj.DisplayName } else { 'SQL Server Browser (no encontrado)' }
+      status = if ($brwObj) { $brwObj.Status.ToString() } else { 'NotFound' }
+      start_type = if ($brwObj -and $brwObj.PSObject.Properties['StartType']) { $brwObj.StartType.ToString() } else { '' }
+    }
+  )
+  $rows | ConvertTo-Json -Compress
+}
+if ($env:VERSAT_IS_LOCAL -eq '1') {
+  & $sb $prefSvc $prefInst
+} else {
+  $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
+  $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
+  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList $prefSvc, $prefInst
+}
+"#;
+
+    let pref_svc_env = preferred_service.clone();
+    let pref_inst_env = sql_instance.clone();
+    let host_label = host.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        run_powershell_with_env(
+            &host,
+            &domain,
+            &username,
+            &password,
+            script,
+            &[
+                ("VERSAT_PREF_SVC", &pref_svc_env),
+                ("VERSAT_PREF_INST", &pref_inst_env),
+            ],
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+
+    match res {
+        Ok(json_str) => match serde_json::from_str::<Vec<SqlServiceInfo>>(&json_str) {
+            Ok(services) if !services.is_empty() => {
+                let detected_instance = services
+                    .iter()
+                    .find(|s| s.role == "engine")
+                    .and_then(|s| s.service_name.strip_prefix("MSSQL$"))
+                    .unwrap_or("")
+                    .to_string();
+                SqlServicesSnapshot {
+                    ok: true,
+                    detected_instance,
+                    detail: format!("Estado actualizado directamente desde {}", host_label),
+                    services,
+                }
+            }
+            Ok(_) | Err(_) => SqlServicesSnapshot {
+                ok: false,
+                detected_instance: fallback_inst,
+                detail: format!("Respuesta inesperada consultando servicios en {}: {}", host_label, json_str),
+                services: fallback_list,
+            },
+        },
+        Err(err) => SqlServicesSnapshot {
+            ok: false,
+            detected_instance: fallback_inst,
+            detail: err,
+            services: fallback_list,
+        },
+    }
+}
+
 pub async fn control_sql_service(
     host: String,
     domain: String,
@@ -324,6 +601,15 @@ pub async fn control_sql_service(
     service_name: String,
     action: String,
 ) -> OpResult {
+    let clean_svc = service_name.trim().to_string();
+    if clean_svc.is_empty() {
+        return OpResult {
+            ok: false,
+            summary: "Servicio no especificado".to_string(),
+            detail: "Selecciona un servicio SQL válido para iniciar, reiniciar o detener.".to_string(),
+        };
+    }
+
     let ps_cmd = match action.as_str() {
         "start" => "Start-Service -Name $svc; (Get-Service -Name $svc).Status.ToString()",
         "stop" => "Stop-Service -Name $svc -Force; (Get-Service -Name $svc).Status.ToString()",
@@ -337,27 +623,35 @@ pub async fn control_sql_service(
         }
     };
 
-    let safe_svc = service_name.replace("'", "");
     let script = format!(
         r#"
 $ErrorActionPreference = 'Stop'
+$svcArg = $env:VERSAT_SVC_NAME
 $sb = {{
   param($svc)
   {}
 }}
 if ($env:VERSAT_IS_LOCAL -eq '1') {{
-  & $sb '{}'
+  & $sb $svcArg
 }} else {{
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList '{}'
+  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList $svcArg
 }}
 "#,
-        ps_cmd, safe_svc, safe_svc
+        ps_cmd
     );
 
+    let svc_for_env = clean_svc.clone();
     let res = tokio::task::spawn_blocking(move || {
-        run_powershell_with_cred(&host, &domain, &username, &password, &script)
+        run_powershell_with_env(
+            &host,
+            &domain,
+            &username,
+            &password,
+            &script,
+            &[("VERSAT_SVC_NAME", &svc_for_env)],
+        )
     })
     .await
     .map_err(|e| e.to_string())
@@ -366,12 +660,12 @@ if ($env:VERSAT_IS_LOCAL -eq '1') {{
     match res {
         Ok(status) => OpResult {
             ok: true,
-            summary: format!("Servicio {} actualizado", service_name),
+            summary: format!("Servicio {} actualizado", clean_svc),
             detail: format!("Acción '{}' ejecutada. Estado actual: {}", action, status),
         },
         Err(err) => OpResult {
             ok: false,
-            summary: format!("Error controlando servicio {}", service_name),
+            summary: format!("Error controlando servicio {}", clean_svc),
             detail: err,
         },
     }

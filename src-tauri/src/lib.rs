@@ -9,8 +9,9 @@ mod tray;
 mod win_metrics;
 
 use admin_ops::{
-    configure_remote_firewall, control_sql_service, diagnose_ports, restart_windows_server,
-    test_sql_credentials, test_windows_credentials, DiagnosticPortCheck, OpResult,
+    configure_remote_firewall, control_sql_service, diagnose_ports, list_sql_services,
+    restart_windows_server, test_sql_credentials, test_windows_credentials, DiagnosticPortCheck,
+    OpResult, SqlServicesSnapshot,
 };
 use config::{load_config, save_config, MonitorConfig};
 use monitor::{execute_probe_cycle, spawn_monitor_loop, ProbeSample, SharedMonitorState};
@@ -111,6 +112,28 @@ async fn cmd_fix_firewall(
 }
 
 #[tauri::command]
+async fn cmd_list_sql_services(
+    state: State<'_, AppState>,
+    server_id: Option<String>,
+) -> Result<SqlServicesSnapshot, String> {
+    let srv = state
+        .0
+        .lock()
+        .unwrap()
+        .config
+        .resolve_server(server_id.as_deref());
+    Ok(list_sql_services(
+        srv.host,
+        srv.win_domain,
+        srv.win_username,
+        srv.win_password,
+        srv.windows_service_name,
+        srv.sql_instance,
+    )
+    .await)
+}
+
+#[tauri::command]
 async fn cmd_control_sql_service(
     state: State<'_, AppState>,
     server_id: Option<String>,
@@ -171,6 +194,7 @@ pub fn run() {
             cmd_test_sql,
             cmd_diagnose_ports,
             cmd_fix_firewall,
+            cmd_list_sql_services,
             cmd_control_sql_service,
             cmd_restart_windows
         ])

@@ -203,6 +203,22 @@
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
       max-width: 440px; width: 100%; padding: 22px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); color: var(--text);
     }
+    .svc-list { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+    .svc-row {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+      padding: 14px 20px; border-bottom: 1px solid var(--border-subtle);
+    }
+    .svc-row:last-child { border-bottom: none; }
+    .svc-row:hover { background: var(--surface-muted); }
+    .svc-info { min-width: 220px; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+    .svc-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .svc-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    .svc-name { font-size: 12px; font-weight: 600; color: var(--text-body); }
+    .svc-sub { font-size: 11px; color: var(--muted); }
+    .svc-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+    .svc-status { min-width: 112px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+    .svc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .svc-actions .btn { padding: 6px 11px; font-size: 11px; white-space: nowrap; }
     @media (max-width: 980px) {
       .kpi-grid, .two-col, .form-grid-4 { grid-template-columns: 1fr 1fr; }
       .form-grid-3, .preset-grid, .check-grid { grid-template-columns: 1fr; }
@@ -505,7 +521,7 @@
               <button type="button" class="btn btn-primary" onclick="fixFirewall()">Agregar excepciones Ping y SQL al Firewall</button>
             </div>
           </div>
-          <div style="border:1px solid #e2e8f0; border-radius:8px; overflow-x:auto;">
+          <div style="border:1px solid var(--border); border-radius:8px; overflow-x:auto;">
             <table>
               <thead>
                 <tr>
@@ -517,50 +533,36 @@
                 </tr>
               </thead>
               <tbody id="diagRows">
-                <tr><td colspan="5" style="text-align:center; padding:18px; color:#64748b;">Pulsa «Diagnosticar puertos» para probar Ping ICMPv4, SQL TCP, WinRM (5985) y WMI RPC (135).</td></tr>
+                <tr><td colspan="5" style="text-align:center; padding:18px; color:var(--muted);">Pulsa «Diagnosticar puertos» para probar Ping ICMPv4, SQL TCP, WinRM (5985) y WMI RPC (135).</td></tr>
               </tbody>
             </table>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <span style="font-size:12px; color:#64748b;">Si WinRM (5985) está cerrado por primera vez en el servidor, ejecuta este script como Administrador en el propio Windows Server:</span>
+            <span style="font-size:12px; color:var(--muted);">Si WinRM (5985) está cerrado por primera vez en el servidor, ejecuta este script como Administrador en el propio Windows Server:</span>
             <button type="button" class="btn btn-secondary" onclick="toggleLocalScript()">Ver script PowerShell local</button>
           </div>
           <pre id="localScriptBox" class="code-box mono hidden"></pre>
         </section>
 
-        <div class="two-col">
-          <section class="card card-pad" style="display:flex; flex-direction:column; gap:14px;">
-            <div class="card-head">
-              <div>
-                <h2 class="card-title">Control remoto de servicios SQL Server</h2>
-                <p class="card-sub">Inicia, reinicia o detiene el servicio SQL en el Windows Server.</p>
-              </div>
-            </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              <button type="button" class="btn btn-soft" onclick="setSvc('MSSQLSERVER')">MSSQLSERVER</button>
-              <button type="button" class="btn btn-soft" onclick="setSvc('SQLSERVERAGENT')">SQLSERVERAGENT</button>
-              <button type="button" class="btn btn-soft" onclick="setSvc('SQLBrowser')">SQLBrowser</button>
-            </div>
-            <div class="field">
-              <label>Nombre del servicio en Windows</label>
-              <input id="admin_svc_name" type="text" class="mono" value="MSSQLSERVER" />
-            </div>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-              <button type="button" class="btn btn-success" onclick="controlSql('start')">Iniciar servicio</button>
-              <button type="button" class="btn btn-secondary" onclick="askConfirm('service','restart')">Reiniciar servicio</button>
-              <button type="button" class="btn btn-danger-soft" onclick="askConfirm('service','stop')">Detener servicio</button>
-            </div>
-          </section>
-
-          <section class="card card-pad" style="border-color:#fecaca; display:flex; flex-direction:column; justify-content:space-between; gap:14px;">
+        <section class="card" style="overflow:hidden;">
+          <div class="card-head" style="padding:18px 20px 14px; border-bottom:none;">
             <div>
-              <h2 class="card-title" style="color:#b91c1c;">Reinicio del Windows Server</h2>
-              <p class="card-sub" style="margin-top:6px;">Ejecuta un reinicio completo del sistema operativo en el servidor configurado (<span class="mono" id="rebootTarget">—</span>).</p>
-              <div class="banner err" style="margin-top:12px;">Recomendado solo cuando SQL Server quede bloqueado a nivel de OS o tras actualizaciones críticas.</div>
+              <h2 class="card-title">Control remoto de servicios SQL Server</h2>
+              <p class="card-sub">Estado en tiempo real y control directo de Motor SQL, Agente SQL y SQL Browser en <span class="mono" id="svcHostLabel">—</span>.</p>
             </div>
-            <button type="button" class="btn btn-danger" onclick="askConfirm('reboot','reboot')">Reiniciar Windows Server</button>
-          </section>
-        </div>
+            <button type="button" id="refreshSvcBtn" class="btn btn-secondary" onclick="refreshSqlServices()">Actualizar estado</button>
+          </div>
+          <div id="sqlServicesList" class="svc-list"></div>
+          <div id="sqlServicesNote" style="padding:10px 20px; font-size:11px; color:var(--muted); background:var(--surface-muted); border-top:1px solid var(--border-subtle);" class="hidden"></div>
+        </section>
+
+        <section class="card card-pad" style="border-color:var(--err-bd); display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px;">
+          <div style="max-width:680px;">
+            <h2 class="card-title" style="color:var(--crit-txt);">Reinicio del Windows Server</h2>
+            <p class="card-sub" style="margin-top:6px;">Ejecuta un reinicio completo del sistema operativo en <span class="mono" id="rebootTarget">—</span>. Recomendado solo cuando SQL Server quede bloqueado a nivel de OS o tras actualizaciones críticas.</p>
+          </div>
+          <button type="button" class="btn btn-danger" onclick="askConfirm('reboot','reboot')">Reiniciar Windows Server</button>
+        </section>
 
         <div id="adminMsg" class="banner hidden"></div>
       </div>
@@ -571,7 +573,7 @@
   <div id="confirmModal" class="modal-backdrop hidden">
     <div class="modal-card">
       <h3 id="modalTitle" style="margin:0 0 8px; font-size:16px;">Confirmar acción</h3>
-      <p id="modalDesc" style="margin:0 0 18px; font-size:12px; color:#475569; line-height:1.5;"></p>
+      <p id="modalDesc" style="margin:0 0 18px; font-size:12px; color:var(--muted); line-height:1.5;"></p>
       <div style="display:flex; justify-content:flex-end; gap:10px;">
         <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
         <button type="button" class="btn btn-danger" onclick="confirmPending()">Confirmar y ejecutar</button>
@@ -592,6 +594,9 @@
     var isPaused = false;
     var logFilter = 'all';
     var pendingOp = null;
+    var activeTabName = 'dashboard';
+    var sqlServicesSnapshot = null;
+    var svcActionBusy = false;
     var themeMode = localStorage.getItem('wsm-theme-mode') || 'system';
     var themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -698,6 +703,7 @@
     }
 
     function switchTab(tab) {
+      activeTabName = tab;
       var tabs = ['dashboard','config','admin'];
       for (var i = 0; i < tabs.length; i++) {
         var t = tabs[i];
@@ -713,6 +719,10 @@
         admin: 'Firewall, servicios SQL y reinicio'
       };
       document.getElementById('tbTitle').textContent = titles[tab] || 'Monitorización';
+      if (tab === 'admin') {
+        renderSqlServices();
+        refreshSqlServices();
+      }
     }
 
     function applyPreset(ping, sql, res, timeout) {
@@ -737,7 +747,6 @@
         var cf = srvChkFields[k];
         document.getElementById(cf).checked = !!srv[cf];
       }
-      document.getElementById('admin_svc_name').value = srv.windows_service_name || 'MSSQLSERVER';
       renderConfigServerTabs();
     }
 
@@ -787,12 +796,17 @@
         syncFormToModel();
       }
       activeServerId = id;
+      sqlServicesSnapshot = null;
       document.getElementById('winTestMsg').className = 'banner hidden';
       document.getElementById('sqlTestMsg').className = 'banner hidden';
       loadActiveServerIntoForm();
       updateHeaderAndSidebar();
       updateLocalScript();
       renderDashboard();
+      if (activeTabName === 'admin') {
+        renderSqlServices();
+        refreshSqlServices();
+      }
     }
 
     function addServerFromUi() {
@@ -906,6 +920,8 @@
       var lbl = srv.server_label || 'Servidor';
       document.getElementById('tbServer').textContent = lbl;
       document.getElementById('rebootTarget').textContent = lbl + ' (' + (srv.host || '') + ')';
+      var svcHostEl = document.getElementById('svcHostLabel');
+      if (svcHostEl) svcHostEl.textContent = srv.host || '—';
       document.getElementById('kpiIntervals').textContent = (current.ping_interval_secs || 10) + 's / ' + (current.sql_interval_secs || 30) + 's / ' + (current.resource_interval_secs || 30) + 's';
       document.getElementById('pauseBtn').textContent = isPaused ? 'Reanudar muestreo' : 'Pausar muestreo';
       renderSidebarServers();
@@ -1198,8 +1214,128 @@
       document.getElementById('localScriptBox').classList.toggle('hidden');
     }
 
-    function setSvc(name) {
-      document.getElementById('admin_svc_name').value = name;
+    function deriveFallbackSqlServices(srv) {
+      var instRaw = (srv.sql_instance || '').trim();
+      var svcRaw = (srv.windows_service_name || '').trim();
+      var inst = '';
+      if (instRaw && instRaw.toUpperCase() !== 'MSSQLSERVER') {
+        inst = instRaw;
+      } else {
+        var m = svcRaw.match(/^(?:MSSQL|SQLAgent)\$(.+)$/i);
+        if (m) inst = m[1];
+      }
+      return [
+        {
+          role: 'engine',
+          title: 'Motor SQL Server',
+          service_name: inst ? ('MSSQL$' + inst) : (svcRaw || 'MSSQLSERVER'),
+          display_name: inst ? ('SQL Server (' + inst + ')') : 'SQL Server (MSSQLSERVER)',
+          status: 'Unknown',
+          start_type: ''
+        },
+        {
+          role: 'agent',
+          title: 'Agente SQL Server',
+          service_name: inst ? ('SQLAgent$' + inst) : 'SQLSERVERAGENT',
+          display_name: inst ? ('SQL Server Agent (' + inst + ')') : 'SQL Server Agent (MSSQLSERVER)',
+          status: 'Unknown',
+          start_type: ''
+        },
+        {
+          role: 'browser',
+          title: 'SQL Server Browser',
+          service_name: 'SQLBrowser',
+          display_name: 'SQL Server Browser',
+          status: 'Unknown',
+          start_type: ''
+        }
+      ];
+    }
+
+    function formatSvcStatusHtml(status) {
+      if (status === 'Running') {
+        return '<span class="svc-status ok-txt"><span aria-hidden="true">●</span> Iniciado</span>';
+      }
+      if (status === 'Stopped') {
+        return '<span class="svc-status crit-txt"><span aria-hidden="true">■</span> Detenido</span>';
+      }
+      if (status === 'Paused') {
+        return '<span class="svc-status warn-txt"><span aria-hidden="true">❚❚</span> Pausado</span>';
+      }
+      if (status === 'StartPending' || status === 'StopPending') {
+        return '<span class="svc-status warn-txt">En transición</span>';
+      }
+      if (status === 'NotFound') {
+        return '<span class="svc-status muted-txt">No instalado</span>';
+      }
+      return '<span class="svc-status muted-txt">Sin consultar</span>';
+    }
+
+    function renderSqlServices() {
+      var srv = getActiveServer();
+      var box = document.getElementById('sqlServicesList');
+      var noteEl = document.getElementById('sqlServicesNote');
+      if (!box) return;
+      var list = (sqlServicesSnapshot && sqlServicesSnapshot.services && sqlServicesSnapshot.services.length)
+        ? sqlServicesSnapshot.services
+        : deriveFallbackSqlServices(srv);
+
+      var html = '';
+      for (var i = 0; i < list.length; i++) {
+        var item = list[i];
+        var sName = item.service_name || '';
+        var notFound = item.status === 'NotFound' || svcActionBusy;
+        var disAttr = notFound ? ' disabled' : '';
+        var subLine = esc(item.display_name || sName) + (item.start_type ? ' · Inicio: ' + esc(item.start_type) : '');
+        html += '<div class="svc-row">' +
+          '<div class="svc-info">' +
+            '<div class="svc-title-line">' +
+              '<span class="svc-title">' + esc(item.title || sName) + '</span>' +
+              '<span class="muted-txt" aria-hidden="true">·</span>' +
+              '<span class="svc-name mono">' + esc(sName) + '</span>' +
+            '</div>' +
+            '<div class="svc-sub">' + subLine + '</div>' +
+          '</div>' +
+          '<div class="svc-controls">' +
+            formatSvcStatusHtml(item.status) +
+            '<div class="svc-actions">' +
+              '<button type="button" class="btn btn-success"' + disAttr + ' data-svc="' + esc(sName) + '" onclick="controlSql(this.getAttribute(\'data-svc\'), \'start\')">Iniciar</button>' +
+              '<button type="button" class="btn btn-secondary"' + disAttr + ' data-svc="' + esc(sName) + '" onclick="askServiceConfirm(this.getAttribute(\'data-svc\'), \'restart\')">Reiniciar</button>' +
+              '<button type="button" class="btn btn-danger-soft"' + disAttr + ' data-svc="' + esc(sName) + '" onclick="askServiceConfirm(this.getAttribute(\'data-svc\'), \'stop\')">Detener</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }
+      box.innerHTML = html;
+
+      if (noteEl) {
+        if (sqlServicesSnapshot && sqlServicesSnapshot.detail) {
+          noteEl.textContent = sqlServicesSnapshot.detail;
+          noteEl.classList.remove('hidden');
+        } else {
+          noteEl.classList.add('hidden');
+        }
+      }
+    }
+
+    async function refreshSqlServices() {
+      var btn = document.getElementById('refreshSvcBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Consultando...';
+      }
+      try {
+        var snap = await invoke('cmd_list_sql_services', { serverId: activeServerId });
+        sqlServicesSnapshot = snap;
+        renderSqlServices();
+      } catch (e) {
+        renderSqlServices();
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Actualizar estado';
+        }
+      }
     }
 
     async function fixFirewall() {
@@ -1208,24 +1344,37 @@
       showBanner('adminMsg', res.ok, res.summary, res.detail);
     }
 
-    async function controlSql(action) {
-      await saveConfig();
-      var svc = document.getElementById('admin_svc_name').value || 'MSSQLSERVER';
-      var res = await invoke('cmd_control_sql_service', { serverId: activeServerId, serviceName: svc, action: action });
-      showBanner('adminMsg', res.ok, res.summary, res.detail);
+    async function controlSql(serviceName, action) {
+      if (!serviceName) return;
+      svcActionBusy = true;
+      renderSqlServices();
+      try {
+        await saveConfig();
+        var res = await invoke('cmd_control_sql_service', {
+          serverId: activeServerId,
+          serviceName: serviceName,
+          action: action
+        });
+        showBanner('adminMsg', res.ok, res.summary, res.detail);
+      } finally {
+        svcActionBusy = false;
+        await refreshSqlServices();
+      }
+    }
+
+    function askServiceConfirm(serviceName, action) {
+      var srv = getActiveServer();
+      pendingOp = { type: 'service', serviceName: serviceName, action: action };
+      document.getElementById('modalTitle').textContent = (action === 'stop' ? 'Detener' : 'Reiniciar') + ' servicio ' + serviceName;
+      document.getElementById('modalDesc').textContent = 'Las conexiones activas contra SQL Server en ' + (srv.host || '') + ' pueden interrumpirse mientras se ejecuta la orden sobre ' + serviceName + '.';
+      document.getElementById('confirmModal').classList.remove('hidden');
     }
 
     function askConfirm(type, action) {
       var srv = getActiveServer();
       pendingOp = { type: type, action: action };
-      var svc = document.getElementById('admin_svc_name').value || 'MSSQLSERVER';
-      if (type === 'reboot') {
-        document.getElementById('modalTitle').textContent = 'Reiniciar ' + (srv.server_label || '') + ' (' + (srv.host || '') + ')';
-        document.getElementById('modalDesc').textContent = 'Esta acción cerrará todas las sesiones abiertas en Windows Server y reiniciará el equipo de inmediato.';
-      } else {
-        document.getElementById('modalTitle').textContent = (action === 'stop' ? 'Detener' : 'Reiniciar') + ' servicio ' + svc;
-        document.getElementById('modalDesc').textContent = 'Las conexiones activas contra SQL Server en ' + (srv.host || '') + ' se interrumpirán mientras se ejecuta la orden.';
-      }
+      document.getElementById('modalTitle').textContent = 'Reiniciar ' + (srv.server_label || '') + ' (' + (srv.host || '') + ')';
+      document.getElementById('modalDesc').textContent = 'Esta acción cerrará todas las sesiones abiertas en Windows Server y reiniciará el equipo de inmediato.';
       document.getElementById('confirmModal').classList.remove('hidden');
     }
 
@@ -1243,7 +1392,7 @@
         var res = await invoke('cmd_restart_windows', { serverId: activeServerId });
         showBanner('adminMsg', res.ok, res.summary, res.detail);
       } else {
-        await controlSql(op.action);
+        await controlSql(op.serviceName, op.action);
       }
     }
 

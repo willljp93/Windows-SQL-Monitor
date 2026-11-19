@@ -1,18 +1,25 @@
 name: Compilar Windows-SQL Monitor (.exe)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la web
   push:
-    branches: [ main ]
+    tags:
+      - 'v*' # Solo se ejecuta al subir un tag que empiece por "v" (ej. v1.2.0)
+
+permissions:
+  contents: write # Permiso obligatorio para que GitHub Actions pueda crear el Release
 
 jobs:
   build-windows-exe:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
+
       - name: Instalar Tauri CLI
         run: cargo install tauri-cli --version "^2.0"
+
       - name: Preparar iconos de la aplicación
         shell: pwsh
         run: |
@@ -32,11 +39,21 @@ jobs:
             Copy-Item "src-tauri/icons/app-icon-clean.png" "ui/app-icon.png" -Force
             cargo tauri icon "src-tauri/icons/app-icon-clean.png"
           }
-      - name: Compilar instalador NSIS (.exe)
+
+      - name: Compilar instalador y crear Release
         uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
           args: --bundles nsis
+          # Aquí le decimos a Tauri que cree la Release automáticamente
+          tagName: v__VERSION__ # Tauri reemplazará __VERSION__ con la versión de tu tauri.conf.json
+          releaseName: "Windows-SQL Monitor v__VERSION__"
+          releaseBody: "Descarga el instalador .exe a continuación para instalar la nueva versión."
+          releaseDraft: true # Lo crea como borrador. Entras a GitHub, revisas y le das a "Publicar".
+          prerelease: false
+
       - name: Publicar artefacto Setup.exe
         uses: actions/upload-artifact@v4
         with:
