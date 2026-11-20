@@ -19,8 +19,8 @@ Abre PowerShell en la carpeta raíz del proyecto y ejecuta:
 
 El script limpia iconos antiguos, genera `icon.ico` y PNGs desde el icono seleccionado, compila en modo *release* optimizado y genera **ambos instaladores** en la carpeta `release-bundles\`:
 
-- `release-bundles\Windows-SQL-Monitor_1.2.0_x64-setup.exe` *(estándar ligero, ~5–8 MB)*
-- `release-bundles\Windows-SQL-Monitor_1.2.0_x64-offline-WebView2-setup.exe` *(100% offline con WebView2 incluido, ~135 MB)*
+- `release-bundles\Windows-SQL-Monitor_1.2.2_x64-setup.exe` *(estándar ligero, ~5–8 MB)*
+- `release-bundles\Windows-SQL-Monitor_1.2.2_x64-offline-WebView2-setup.exe` *(100% offline con WebView2 incluido, ~135 MB)*
 
 Si en algún momento quieres generar solo una variante localmente, puedes usar el parámetro `-Mode`:
 
@@ -38,15 +38,15 @@ El archivo [`.github/workflows/build-windows-exe.yml`](../.github/workflows/buil
 1. Compilar automáticamente al subir un *tag* `v*`:
    ```bash
    git add .
-   git commit -m "Release v1.2.0"
-   git tag v1.2.0
+   git commit -m "Release v1.2.2"
+   git tag v1.2.2
    git push origin main
-   git push origin v1.2.0
+   git push origin v1.2.2
    ```
 2. Permitir ejecución manual desde **Actions → Compilar Windows-SQL Monitor (.exe) → Run workflow**.
-3. Compilar las dos variantes (`estándar` y `offline con WebView2` usando `src-tauri/tauri.offline.conf.json`) y crear un **Release en borrador** en GitHub (`Windows-SQL Monitor v1.2.0`) con **ambos archivos `.exe` adjuntos**.
+3. Compilar las dos variantes (`estándar` y `offline con WebView2` usando `src-tauri/tauri.offline.conf.json`) y crear un **Release en borrador** en GitHub (`Windows-SQL Monitor v1.2.2`) con **ambos archivos `.exe` adjuntos**.
 
-> Recuerda mantener sincronizado el número de versión del *tag* (por ejemplo `v1.2.0`) con `"version"` en `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`.
+> Recuerda mantener sincronizado el número de versión del *tag* (por ejemplo `v1.2.2`) con `"version"` en `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`.
 
 ---
 

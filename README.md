@@ -1,6 +1,6 @@
 # Windows-SQL Monitor
 
-**Versión 1.2.0 (2026)** · Aplicación de escritorio ligera en **Rust + Tauri v2** para monitorizar en tiempo real hasta **3 servidores Windows Server y SQL Server** desde la bandeja del sistema (*System Tray*).
+**Versión 1.2.2 (2026)** · Aplicación de escritorio ligera en **Rust + Tauri v2** para monitorizar en tiempo real hasta **3 servidores Windows Server y SQL Server** desde la bandeja del sistema (*System Tray*).
 
 ---
 
@@ -46,8 +46,8 @@ Ejecuta en PowerShell dentro de la raíz del proyecto:
 Por defecto genera **automáticamente ambos instaladores** en la carpeta `release-bundles\` *(también puedes pasar `-Mode Standard` o `-Mode Offline` si solo deseas uno)*:
 
 ```text
-release-bundles\Windows-SQL-Monitor_1.2.0_x64-setup.exe                 (~5-8 MB, estándar ligero)
-release-bundles\Windows-SQL-Monitor_1.2.0_x64-offline-WebView2-setup.exe (~135 MB, WebView2 incluido sin Internet)
+release-bundles\Windows-SQL-Monitor_1.2.2_x64-setup.exe                 (~5-8 MB, estándar ligero)
+release-bundles\Windows-SQL-Monitor_1.2.2_x64-offline-WebView2-setup.exe (~135 MB, WebView2 incluido sin Internet)
 ```
 
 ---
@@ -58,8 +58,8 @@ El repositorio incluye el workflow [`.github/workflows/build-windows-exe.yml`](.
 
 1. Sube una etiqueta (*tag*) con la versión:
    ```bash
-   git tag v1.2.0
-   git push origin v1.2.0
+   git tag v1.2.2
+   git push origin v1.2.2
    ```
 2. O ejecútalo manualmente desde la pestaña **Actions → Compilar Windows-SQL Monitor (.exe) → Run workflow**.
 3. GitHub Actions compilará **ambos instaladores** en `windows-latest` y creará automáticamente un **Release en borrador (Draft)** con los dos `.exe` adjuntos (`estándar` y `offline con WebView2`), listo para revisar y publicar.
@@ -114,7 +114,7 @@ El repositorio incluye el workflow [`.github/workflows/build-windows-exe.yml`](.
 ## Autor y créditos
 
 - **Aplicación:** Windows-SQL Monitor
-- **Versión:** 1.2.0 (2026)
+- **Versión:** 1.2.2 (2026)
 - **Autor:** William Jiménez Puentes
 - **Correo:** willjp93@gmail.com
 - **GitHub:** https://github.com/willljp93

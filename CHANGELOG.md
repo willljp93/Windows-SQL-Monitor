@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0] - 2026
+## [1.2.2] - 2026
 
 ### Añadido
 - Soporte multi-servidor para monitorizar hasta **3 servidores Windows / SQL Server** en paralelo.
