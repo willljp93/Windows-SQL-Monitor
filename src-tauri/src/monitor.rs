@@ -353,7 +353,7 @@ pub async fn execute_probe_cycle(
                 format!("{}: {} · SQL {}", s.server_label, p, sq)
             })
             .collect();
-        let tooltip = format!("Windows-SQL Monitor v1.2\n{}", summary_lines.join("\n"));
+        let tooltip = format!("Windows-SQL Monitor v{}\n{}", env!("CARGO_PKG_VERSION"), summary_lines.join("\n"));
 
         (collected_samples, worst, alerts, tooltip)
     };

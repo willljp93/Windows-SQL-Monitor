@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # Permite ejecutarlo manualmente desde la web
   push:
     tags:
-      - 'v*' # Solo se ejecuta al subir un tag que empiece por "v" (ej. v1.2.1)
+      - 'v*' # Se ejecuta automáticamente al subir un tag que empiece por "v" (ej. v1.2.0)
 
 permissions:
   contents: write # Permiso obligatorio para que GitHub Actions pueda crear el Release
@@ -20,6 +20,16 @@ jobs:
       - name: Instalar Tauri CLI
         run: cargo install tauri-cli --version "^2.0"
 
+      - name: Resolver versión y etiqueta
+        id: meta
+        shell: pwsh
+        run: |
+          $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $ver = $conf.version
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v$ver" }
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Preparar iconos de la aplicación
         shell: pwsh
         run: |
@@ -28,34 +38,64 @@ jobs:
           $src = if (Test-Path "src-tauri/icons/app-icon-source.png") { "src-tauri/icons/app-icon-source.png" } elseif (Test-Path "src-tauri/icons/app-icon-source.jpg") { "src-tauri/icons/app-icon-source.jpg" } else { $null }
           if ($src) {
             $img = [System.Drawing.Image]::FromFile((Resolve-Path $src))
-            $bmp = New-Object System.Drawing.Bitmap(512, 512, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-            $g = [System.Drawing.Graphics]::FromImage($bmp)
-            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-            $g.Clear([System.Drawing.Color]::Transparent)
-            $g.DrawImage($img, 0, 0, 512, 512)
-            $g.Dispose()
-            $bmp.Save("src-tauri/icons/app-icon-clean.png", [System.Drawing.Imaging.ImageFormat]::Png)
-            $bmp.Dispose(); $img.Dispose()
+            if ($src -eq "src-tauri/icons/app-icon-source.png" -and $img.Width -eq 512 -and $img.Height -eq 512) {
+              $img.Dispose()
+              Copy-Item "src-tauri/icons/app-icon-source.png" "src-tauri/icons/app-icon-clean.png" -Force
+            } else {
+              $bmp = New-Object System.Drawing.Bitmap(512, 512, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+              $g.Clear([System.Drawing.Color]::Transparent)
+              $g.DrawImage($img, 0, 0, 512, 512)
+              $g.Dispose()
+              $bmp.Save("src-tauri/icons/app-icon-clean.png", [System.Drawing.Imaging.ImageFormat]::Png)
+              $bmp.Dispose(); $img.Dispose()
+            }
             Copy-Item "src-tauri/icons/app-icon-clean.png" "ui/app-icon.png" -Force
             cargo tauri icon "src-tauri/icons/app-icon-clean.png"
           }
 
-      - name: Compilar instalador y crear Release
-        uses: tauri-apps/tauri-action@v0
+      - name: Compilar instaladores (.exe estándar y .exe offline WebView2)
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path "release-bundles" | Out-Null
+          $nsisDir = "src-tauri/target/release/bundle/nsis"
+
+          Write-Host "=== [1/2] Compilando instalador estándar (ligero) ==="
+          cargo tauri build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $stdExe = Get-ChildItem -Path $nsisDir -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Copy-Item $stdExe.FullName "release-bundles/Windows-SQL-Monitor_$($ver)_x64-setup.exe" -Force
+
+          Write-Host "=== [2/2] Compilando instalador offline con WebView2 incluido ==="
+          cargo tauri build --bundles nsis --config src-tauri/tauri.offline.conf.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $offExe = Get-ChildItem -Path $nsisDir -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Copy-Item $offExe.FullName "release-bundles/Windows-SQL-Monitor_$($ver)_x64-offline-WebView2-setup.exe" -Force
+
+          Get-ChildItem "release-bundles"
+
+      - name: Crear Release en borrador con ambos instaladores
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: .
-          args: --bundles nsis
-          # Aquí le decimos a Tauri que cree la Release automáticamente
-          tagName: v__VERSION__ # Tauri reemplazará __VERSION__ con la versión de tu tauri.conf.json
-          releaseName: "Windows-SQL Monitor v__VERSION__"
-          releaseBody: "Descarga el instalador .exe a continuación para instalar la nueva versión."
-          releaseDraft: true # Lo crea como borrador. Entras a GitHub, revisas y le das a "Publicar".
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "Windows-SQL Monitor ${{ steps.meta.outputs.tag }}"
+          draft: true # Lo crea como borrador. Entras a GitHub, revisas y le das a "Publicar".
           prerelease: false
+          files: release-bundles/*.exe
+          body: |
+            ## Windows-SQL Monitor ${{ steps.meta.outputs.tag }}
 
-      - name: Publicar artefacto Setup.exe
+            Selecciona el instalador que mejor se adapte a tu entorno:
+
+            - **`Windows-SQL-Monitor_${{ steps.meta.outputs.version }}_x64-setup.exe`** *(Estándar ligero, ~5–8 MB)*: recomendado para Windows 11 y Windows 10 actualizados con WebView2 ya disponible.
+            - **`Windows-SQL-Monitor_${{ steps.meta.outputs.version }}_x64-offline-WebView2-setup.exe`** *(Offline completo, ~135 MB)*: incluye Microsoft Edge WebView2 Runtime empaquetado dentro del `.exe`, ideal para equipos y servidores sin acceso a Internet.
+
+      - name: Publicar artefactos Setup.exe
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-SQL-Monitor-Installer-EXE
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          name: Windows-SQL-Monitor-Installers-EXE
+          path: release-bundles/*.exe

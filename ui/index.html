@@ -190,6 +190,13 @@
     .banner.ok { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-fg); }
     .banner.warn { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-fg); }
     .banner.err { background: var(--err-bg); border-color: var(--err-bd); color: var(--err-fg); }
+    .server-toolbar {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;
+      background: var(--surface-muted); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: var(--text);
+    }
+    :root.dark .server-toolbar {
+      background: #172338; border-color: #2c3e58; color: var(--text);
+    }
     .hidden { display: none !important; }
     .code-box {
       background: #020617; color: #e2e8f0; border-radius: 8px; padding: 12px;
@@ -234,10 +241,9 @@
   <aside id="sidebarEl" class="sidebar">
     <div class="brand">
       <div class="brand-left">
-        <img src="app-icon.png" onerror="this.onerror=null;this.src='app-icon.jpg';" alt="" style="width:32px; height:32px; border-radius:8px; border:1px solid var(--border); background:#fff; object-fit:contain; padding:2px; flex-shrink:0;" />
+        <img src="app-icon.png" onerror="this.onerror=null;this.src='app-icon.jpg';" alt="" style="width:32px; height:32px; border-radius:8px; background:transparent; object-fit:contain; flex-shrink:0;" />
         <div style="min-width:0;">
           <div class="brand-title">Windows-SQL Monitor</div>
-          <div class="brand-sub">Agente Rust · v1.2</div>
         </div>
       </div>
       <div class="brand-actions">
@@ -268,7 +274,7 @@
     </div>
 
     <div class="sidebar-credits">
-      <strong>Windows-SQL Monitor v1.2</strong>
+      <strong>Windows-SQL Monitor <span id="appVersionText">v1.2.0</span></strong>
       <div>© 2026 William Jiménez Puentes</div>
       <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
         <a href="mailto:willjp93@gmail.com">willjp93@gmail.com</a> · <a href="https://github.com/willljp93" target="_blank" rel="noopener noreferrer">github.com/willljp93</a>
@@ -362,7 +368,7 @@
         </section>
 
         <section class="card" style="overflow:hidden;">
-          <div class="card-pad" style="border-bottom:1px solid #e2e8f0; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px;">
+          <div class="card-pad" style="border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px;">
             <div>
               <h2 class="card-title">Registro de sondeos e incidencias</h2>
               <p class="card-sub" id="logCountSub">0 sondeos registrados</p>
@@ -431,10 +437,10 @@
             </div>
           </div>
 
-          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px;">
+          <div class="server-toolbar">
             <div id="cfgServerTabs" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;"></div>
             <div style="display:flex; align-items:center; gap:12px;">
-              <label style="font-size:12px; display:flex; align-items:center; gap:6px; cursor:pointer;"><input id="srv_enabled" type="checkbox" /> Monitorizar este servidor</label>
+              <label style="font-size:12px; display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text); font-weight:500;"><input id="srv_enabled" type="checkbox" /> Monitorizar este servidor</label>
               <button type="button" id="cfgRemoveSrvBtn" class="btn btn-danger-soft hidden" style="padding:5px 10px; font-size:11px;" onclick="removeActiveServer()">Eliminar</button>
             </div>
           </div>
@@ -696,10 +702,24 @@
       return out;
     }
 
-    function showBanner(id, ok, title, detail) {
+    var bannerTimers = {};
+    function showBanner(id, ok, title, detail, autoHideMs) {
       var el = document.getElementById(id);
+      if (!el) return;
+      if (bannerTimers[id]) {
+        clearTimeout(bannerTimers[id]);
+        delete bannerTimers[id];
+      }
       el.className = 'banner ' + (ok ? 'ok' : 'err');
       el.innerHTML = '<div><strong>' + esc(title) + '</strong><div style="margin-top:2px;">' + esc(detail) + '</div></div>';
+      var delay = typeof autoHideMs === 'number' ? autoHideMs : (ok ? 10000 : 0);
+      if (delay > 0) {
+        bannerTimers[id] = setTimeout(function() {
+          var target = document.getElementById(id);
+          if (target) target.className = 'banner hidden';
+          delete bannerTimers[id];
+        }, delay);
+      }
     }
 
     function switchTab(tab) {
@@ -873,6 +893,11 @@
     }
 
     async function loadConfig() {
+      try {
+        var ver = await invoke('get_app_version');
+        var vEl = document.getElementById('appVersionText');
+        if (ver && vEl) vEl.textContent = 'v' + ver;
+      } catch (e) {}
       current = await invoke('get_config');
       isPaused = await invoke('get_paused');
       ensureServersArray();
@@ -930,13 +955,18 @@
     function updateLocalScript() {
       var srv = getActiveServer();
       var port = srv.sql_port || 1433;
+      var host = srv.host || '10.12.9.4';
       var lines = [
-        '# Ejecutar en PowerShell como Administrador en ' + (srv.server_label || 'Windows Server') + ' (' + (srv.host || '') + ')',
+        '# 1. Ejecutar como Administrador en el Windows Server (' + (srv.server_label || 'Servidor') + ' · ' + host + '):',
         "New-NetFirewallRule -DisplayName 'Versat-Allow-ICMPv4-In' -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow -ErrorAction SilentlyContinue",
         "New-NetFirewallRule -DisplayName 'Versat-Allow-SQL-TCP-" + port + "' -Direction Inbound -Protocol TCP -LocalPort " + port + " -Action Allow -ErrorAction SilentlyContinue",
         "New-NetFirewallRule -DisplayName 'Versat-Allow-SQL-Browser-UDP-1434' -Direction Inbound -Protocol UDP -LocalPort 1434 -Action Allow -ErrorAction SilentlyContinue",
+        "New-NetFirewallRule -DisplayName 'Versat-Allow-WMI-RPC-135' -Direction Inbound -Protocol TCP -LocalPort 135 -Action Allow -ErrorAction SilentlyContinue",
         'Enable-PSRemoting -Force',
-        "New-NetFirewallRule -DisplayName 'Versat-Allow-WinRM-5985' -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue"
+        "New-NetFirewallRule -DisplayName 'Versat-Allow-WinRM-5985' -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
+        '',
+        '# 2. (Opcional en PC cliente Windows 10/11 fuera de dominio, como Administrador):',
+        'Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value "' + host + '" -Concatenate -Force'
       ];
       document.getElementById('localScriptBox').textContent = lines.join('\n');
     }
@@ -948,7 +978,7 @@
       loadActiveServerIntoForm();
       updateHeaderAndSidebar();
       updateLocalScript();
-      showBanner('saveBanner', true, 'Configuración guardada y cifrada', 'Los servidores (hasta 3) y credenciales se protegen localmente con Windows DPAPI.');
+      showBanner('saveBanner', true, 'Configuración guardada y cifrada', 'Los servidores (hasta 3) y credenciales se protegen localmente con Windows DPAPI.', 10000);
     }
 
     async function togglePause() {

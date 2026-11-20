@@ -102,7 +102,7 @@ pub fn setup_tray(app: &AppHandle, state: Arc<Mutex<SharedMonitorState>>) -> tau
     let state_for_menu = state.clone();
     TrayIconBuilder::with_id("windows-sql-monitor-tray")
         .icon(render_tray_icon(TrayVisualState::Nominal))
-        .tooltip("Windows-SQL Monitor v1.2 · Iniciando...")
+        .tooltip(concat!("Windows-SQL Monitor v", env!("CARGO_PKG_VERSION"), " · Iniciando..."))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {

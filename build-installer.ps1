@@ -1,6 +1,12 @@
+param(
+    [ValidateSet("All", "Standard", "Offline")]
+    [string]$Mode = "All"
+)
+
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Windows-SQL Monitor v1.2: Generador de Instalador .exe ===" -ForegroundColor Cyan
+$confJsonBanner = Get-Content (Join-Path $PSScriptRoot "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
+Write-Host "=== Windows-SQL Monitor v$($confJsonBanner.version): Generador de Instaladores .exe (Modo: $Mode) ===" -ForegroundColor Cyan
 
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Write-Error "Rust/Cargo no detectado. Instala Rust desde https://rustup.rs/ y vuelve a intentarlo."
@@ -108,8 +114,21 @@ function Write-ClassicIco([System.Drawing.Bitmap[]]$bitmaps, [string]$outFile) {
 if ($srcImg) {
     Write-Host "Preparando icono seleccionado desde: $srcImg" -ForegroundColor Cyan
     $rawImg = [System.Drawing.Image]::FromFile($srcImg)
-    $bmp512 = New-ResizedIconBitmap $rawImg 512 $true
-    $bmp512.Save($cleanPngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    $rawBmp = New-Object System.Drawing.Bitmap($rawImg)
+    $hasTransparentCorners = (
+        $rawBmp.GetPixel(0, 0).A -lt 20 -and
+        $rawBmp.GetPixel($rawBmp.Width - 1, 0).A -lt 20 -and
+        $rawBmp.GetPixel(0, $rawBmp.Height - 1).A -lt 20 -and
+        $rawBmp.GetPixel($rawBmp.Width - 1, $rawBmp.Height - 1).A -lt 20
+    )
+    if ($srcImg -eq $srcPng -and $hasTransparentCorners -and $rawBmp.Width -eq 512 -and $rawBmp.Height -eq 512) {
+        Copy-Item $srcPng $cleanPngPath -Force
+        $bmp512 = New-Object System.Drawing.Bitmap($cleanPngPath)
+    } else {
+        $bmp512 = New-ResizedIconBitmap $rawImg 512 (-not $hasTransparentCorners)
+        $bmp512.Save($cleanPngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    $rawBmp.Dispose()
     $rawImg.Dispose()
 } else {
     Write-Host "Generando icono moderno por defecto..." -ForegroundColor Yellow
@@ -164,18 +183,54 @@ if (Test-Path $buildRs) {
     (Get-Item $buildRs).LastWriteTime = Get-Date
 }
 
-Write-Host "Compilando binario Rust optimizado y empaquetando Setup.exe..." -ForegroundColor Green
-Push-Location $PSScriptRoot
-cargo tauri build --bundles nsis
-$buildExit = $LASTEXITCODE
-Pop-Location
-if ($buildExit -ne 0) {
-    Write-Error "La compilación de Rust falló (código $buildExit). Revisa los mensajes anteriores."
-    exit $buildExit
+$confJson = Get-Content (Join-Path $PSScriptRoot "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
+$ver = $confJson.version
+$bundlePath = Join-Path $PSScriptRoot "src-tauri\target\release\bundle\nsis"
+$releaseDir = Join-Path $PSScriptRoot "release-bundles"
+New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+$generated = @()
+
+if ($Mode -in @("All", "Standard")) {
+    Write-Host "[1/2] Compilando instalador estándar ligero (.exe)..." -ForegroundColor Green
+    Push-Location $PSScriptRoot
+    cargo tauri build --bundles nsis
+    $buildExit = $LASTEXITCODE
+    Pop-Location
+    if ($buildExit -ne 0) {
+        Write-Error "La compilación estándar de Rust falló (código $buildExit). Revisa los mensajes anteriores."
+        exit $buildExit
+    }
+    $stdExe = Get-ChildItem -Path $bundlePath -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($stdExe) {
+        $destStd = Join-Path $releaseDir "Windows-SQL-Monitor_$($ver)_x64-setup.exe"
+        Copy-Item $stdExe.FullName $destStd -Force
+        $generated += $destStd
+    }
 }
 
-$bundlePath = Join-Path $PSScriptRoot "src-tauri\target\release\bundle\nsis"
-Write-Host "Instalador .exe generado en: $bundlePath" -ForegroundColor Cyan
-if (Test-Path $bundlePath) {
-    Invoke-Item $bundlePath
+if ($Mode -in @("All", "Offline")) {
+    Write-Host "[2/2] Empaquetando instalador offline con WebView2 incluido (.exe)..." -ForegroundColor Green
+    Push-Location $PSScriptRoot
+    cargo tauri build --bundles nsis --config src-tauri\tauri.offline.conf.json
+    $buildExit = $LASTEXITCODE
+    Pop-Location
+    if ($buildExit -ne 0) {
+        Write-Error "La compilación offline (WebView2) falló (código $buildExit). Revisa los mensajes anteriores."
+        exit $buildExit
+    }
+    $offExe = Get-ChildItem -Path $bundlePath -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($offExe) {
+        $destOff = Join-Path $releaseDir "Windows-SQL-Monitor_$($ver)_x64-offline-WebView2-setup.exe"
+        Copy-Item $offExe.FullName $destOff -Force
+        $generated += $destOff
+    }
+}
+
+Write-Host "Instaladores generados en: $releaseDir" -ForegroundColor Cyan
+foreach ($item in $generated) {
+    $mb = [math]::Round(((Get-Item $item).Length / 1MB), 2)
+    Write-Host "  - $item ($mb MB)" -ForegroundColor White
+}
+if (Test-Path $releaseDir) {
+    Invoke-Item $releaseDir
 }

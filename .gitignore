@@ -1,6 +1,7 @@
 # Artefactos de compilación Rust / Tauri
 src-tauri/target/
 src-tauri/gen/
+release-bundles/
 
 # Archivos de sistema y editores
 .DS_Store

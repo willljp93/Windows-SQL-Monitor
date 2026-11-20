@@ -179,16 +179,42 @@ pub async fn test_windows_credentials(
 
     let script = r#"
 $ErrorActionPreference = 'Stop'
+$proto = 'Local'
 if ($env:VERSAT_IS_LOCAL -eq '1') {
   $cim = New-CimSession
 } else {
+  $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  $cim = New-CimSession -ComputerName $env:VERSAT_WIN_HOST -Credential $cred
+  $cim = $null
+  $wsErr = $null
+  try {
+    $cim = New-CimSession -ComputerName $target -Credential $cred -Authentication Negotiate
+    $proto = 'WSMan/WinRM'
+  } catch {
+    $wsErr = $_.Exception.Message
+    try {
+      $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+      if ($isAdmin) {
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value $target -Concatenate -Force -ErrorAction Stop
+        $cim = New-CimSession -ComputerName $target -Credential $cred -Authentication Negotiate
+        $proto = 'WSMan/WinRM'
+      }
+    } catch {}
+    if (-not $cim) {
+      try {
+        $dcomOpt = New-CimSessionOption -Protocol Dcom
+        $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+        $proto = 'DCOM/WMI'
+      } catch {
+        throw "Error WSMan/WinRM: $wsErr | Respaldo DCOM/WMI también falló: $($_.Exception.Message). En equipos fuera de dominio ejecuta como Administrador en esta PC: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '$target' -Concatenate -Force"
+      }
+    }
+  }
 }
 try {
   $os = Get-CimInstance -CimSession $cim -ClassName Win32_OperatingSystem
-  Write-Output "$($os.CSName) · $($os.Caption)"
+  Write-Output "$($os.CSName) · $($os.Caption) [$proto]"
 } finally {
   Remove-CimSession $cim -ErrorAction SilentlyContinue
 }
@@ -205,7 +231,7 @@ try {
         Ok(info) => OpResult {
             ok: true,
             summary: "Credenciales de Windows válidas".to_string(),
-            detail: format!("Autenticación CIM/WinRM correcta en {}", info),
+            detail: format!("Autenticación CIM correcta en {}", info),
         },
         Err(err) => OpResult {
             ok: false,
@@ -323,12 +349,33 @@ $sb = {{
 if ($env:VERSAT_IS_LOCAL -eq '1') {{
   & $sb {}
 }} else {{
+  $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList {}
+  try {{
+    Invoke-Command -ComputerName $target -Credential $cred -Authentication Negotiate -ScriptBlock $sb -ArgumentList {}
+  }} catch {{
+    $wsErr = $_.Exception.Message
+    try {{
+      $dcomOpt = New-CimSessionOption -Protocol Dcom
+      $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+      try {{
+        $portVal = {}
+        $inner = "if (-not (Get-NetFirewallRule -DisplayName 'Versat-Allow-ICMPv4-In' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Versat-Allow-ICMPv4-In' -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow | Out-Null }}; if (-not (Get-NetFirewallRule -DisplayName 'Versat-Allow-SQL-TCP-$portVal' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Versat-Allow-SQL-TCP-$portVal' -Direction Inbound -Protocol TCP -LocalPort $portVal -Action Allow | Out-Null }}; if (-not (Get-NetFirewallRule -DisplayName 'Versat-Allow-SQL-Browser-UDP-1434' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Versat-Allow-SQL-Browser-UDP-1434' -Direction Inbound -Protocol UDP -LocalPort 1434 -Action Allow | Out-Null }}"
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+        $procRes = Invoke-CimMethod -CimSession $cim -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = "powershell.exe -NoProfile -NonInteractive -EncodedCommand $enc" }}
+        if ($procRes.ReturnValue -ne 0) {{ throw "Win32_Process Create devolvió código $($procRes.ReturnValue)" }}
+        Write-Output "Reglas aplicadas vía DCOM/WMI en $target (ICMPv4 + TCP $portVal + UDP 1434)"
+      }} finally {{
+        Remove-CimSession $cim -ErrorAction SilentlyContinue
+      }}
+    }} catch {{
+      throw "Error WinRM ($wsErr) y DCOM ($($_.Exception.Message))"
+    }}
+  }}
 }}
 "#,
-        sql_port, sql_port
+        sql_port, sql_port, sql_port
     );
 
     let res = tokio::task::spawn_blocking(move || {
@@ -535,9 +582,88 @@ $sb = {
 if ($env:VERSAT_IS_LOCAL -eq '1') {
   & $sb $prefSvc $prefInst
 } else {
+  $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList $prefSvc, $prefInst
+  try {
+    Invoke-Command -ComputerName $target -Credential $cred -Authentication Negotiate -ScriptBlock $sb -ArgumentList $prefSvc, $prefInst
+  } catch {
+    $wsErr = $_.Exception.Message
+    try {
+      $dcomOpt = New-CimSessionOption -Protocol Dcom
+      $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+      try {
+        $all = @(Get-CimInstance -CimSession $cim -ClassName Win32_Service -ErrorAction Stop | Where-Object {
+          $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' -or
+          $_.Name -eq 'SQLSERVERAGENT' -or $_.Name -like 'SQLAgent$*' -or
+          $_.Name -eq 'SQLBrowser' -or ($prefSvc -and $_.Name -ieq $prefSvc)
+        })
+        $engines = @($all | Where-Object { $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' -or ($prefSvc -and $_.Name -ieq $prefSvc) })
+        $inst = ''
+        if ($prefInst -and -not ($prefInst -ieq 'MSSQLSERVER')) {
+          $inst = $prefInst.Trim()
+        } elseif ($prefSvc -match '^MSSQL\$(.+)$') {
+          $inst = $Matches[1]
+        } elseif ($prefSvc -match '^SQLAgent\$(.+)$') {
+          $inst = $Matches[1]
+        }
+        $engObj = $null
+        if ($inst) {
+          $targetEng = 'MSSQL$' + $inst
+          $engObj = $engines | Where-Object { $_.Name -ieq $targetEng } | Select-Object -First 1
+        }
+        if (-not $engObj -and $prefSvc) {
+          $engObj = $engines | Where-Object { $_.Name -ieq $prefSvc } | Select-Object -First 1
+        }
+        if (-not $engObj) { $engObj = $engines | Select-Object -First 1 }
+        $resolvedInst = $inst
+        if ($engObj -and $engObj.Name -match '^MSSQL\$(.+)$') {
+          $resolvedInst = $Matches[1]
+        } elseif ($engObj -and $engObj.Name -ieq 'MSSQLSERVER') {
+          $resolvedInst = ''
+        }
+        $engName = if ($engObj) { $engObj.Name } elseif ($resolvedInst) { 'MSSQL$' + $resolvedInst } elseif ($prefSvc) { $prefSvc } else { 'MSSQLSERVER' }
+        $agtName = if ($resolvedInst) { 'SQLAgent$' + $resolvedInst } else { 'SQLSERVERAGENT' }
+        $agtObj = $all | Where-Object { $_.Name -ieq $agtName } | Select-Object -First 1
+        if (-not $agtObj) {
+          $agtObj = $all | Where-Object { $_.Name -eq 'SQLSERVERAGENT' -or $_.Name -like 'SQLAgent$*' } | Select-Object -First 1
+          if ($agtObj) { $agtName = $agtObj.Name }
+        }
+        $brwObj = $all | Where-Object { $_.Name -ieq 'SQLBrowser' } | Select-Object -First 1
+        $rows = @(
+          [PSCustomObject]@{
+            role = 'engine'
+            title = 'Motor SQL Server'
+            service_name = $engName
+            display_name = if ($engObj) { $engObj.DisplayName } else { 'SQL Server (no encontrado)' }
+            status = if ($engObj) { ($engObj.State -replace '\s+', '') } else { 'NotFound' }
+            start_type = if ($engObj) { [string]$engObj.StartMode } else { '' }
+          },
+          [PSCustomObject]@{
+            role = 'agent'
+            title = 'Agente SQL Server'
+            service_name = $agtName
+            display_name = if ($agtObj) { $agtObj.DisplayName } else { 'SQL Server Agent (no encontrado)' }
+            status = if ($agtObj) { ($agtObj.State -replace '\s+', '') } else { 'NotFound' }
+            start_type = if ($agtObj) { [string]$agtObj.StartMode } else { '' }
+          },
+          [PSCustomObject]@{
+            role = 'browser'
+            title = 'SQL Server Browser'
+            service_name = 'SQLBrowser'
+            display_name = if ($brwObj) { $brwObj.DisplayName } else { 'SQL Server Browser (no encontrado)' }
+            status = if ($brwObj) { ($brwObj.State -replace '\s+', '') } else { 'NotFound' }
+            start_type = if ($brwObj) { [string]$brwObj.StartMode } else { '' }
+          }
+        )
+        $rows | ConvertTo-Json -Compress
+      } finally {
+        Remove-CimSession $cim -ErrorAction SilentlyContinue
+      }
+    } catch {
+      throw "Error WinRM ($wsErr) y DCOM ($($_.Exception.Message))"
+    }
+  }
 }
 "#;
 
@@ -627,6 +753,7 @@ pub async fn control_sql_service(
         r#"
 $ErrorActionPreference = 'Stop'
 $svcArg = $env:VERSAT_SVC_NAME
+$actArg = '{}'
 $sb = {{
   param($svc)
   {}
@@ -634,12 +761,49 @@ $sb = {{
 if ($env:VERSAT_IS_LOCAL -eq '1') {{
   & $sb $svcArg
 }} else {{
+  $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  Invoke-Command -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -ScriptBlock $sb -ArgumentList $svcArg
+  try {{
+    Invoke-Command -ComputerName $target -Credential $cred -Authentication Negotiate -ScriptBlock $sb -ArgumentList $svcArg
+  }} catch {{
+    $wsErr = $_.Exception.Message
+    try {{
+      $dcomOpt = New-CimSessionOption -Protocol Dcom
+      $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+      try {{
+        $escaped = $svcArg -replace "'", "''"
+        $svcObj = Get-CimInstance -CimSession $cim -ClassName Win32_Service -Filter "Name='$escaped'"
+        if (-not $svcObj) {{ throw "No se encontró el servicio '$svcArg'" }}
+        if ($actArg -eq 'start') {{
+          $r = Invoke-CimMethod -InputObject $svcObj -MethodName StartService
+          if ($r.ReturnValue -ne 0 -and $r.ReturnValue -ne 10) {{ throw "StartService código $($r.ReturnValue)" }}
+        }} elseif ($actArg -eq 'stop') {{
+          $r = Invoke-CimMethod -InputObject $svcObj -MethodName StopService
+          if ($r.ReturnValue -ne 0 -and $r.ReturnValue -ne 5) {{ throw "StopService código $($r.ReturnValue)" }}
+        }} elseif ($actArg -eq 'restart') {{
+          if ($svcObj.State -eq 'Running') {{
+            $r1 = Invoke-CimMethod -InputObject $svcObj -MethodName StopService
+            if ($r1.ReturnValue -ne 0 -and $r1.ReturnValue -ne 5) {{ throw "StopService código $($r1.ReturnValue)" }}
+            Start-Sleep -Seconds 2
+          }}
+          $svcObj2 = Get-CimInstance -CimSession $cim -ClassName Win32_Service -Filter "Name='$escaped'"
+          $r2 = Invoke-CimMethod -InputObject $svcObj2 -MethodName StartService
+          if ($r2.ReturnValue -ne 0 -and $r2.ReturnValue -ne 10) {{ throw "StartService código $($r2.ReturnValue)" }}
+        }}
+        Start-Sleep -Milliseconds 900
+        $finalObj = Get-CimInstance -CimSession $cim -ClassName Win32_Service -Filter "Name='$escaped'"
+        Write-Output ($finalObj.State -replace '\s+', '')
+      }} finally {{
+        Remove-CimSession $cim -ErrorAction SilentlyContinue
+      }}
+    }} catch {{
+      throw "Error WinRM ($wsErr) y DCOM ($($_.Exception.Message))"
+    }}
+  }}
 }}
 "#,
-        ps_cmd
+        action, ps_cmd
     );
 
     let svc_for_env = clean_svc.clone();
@@ -683,10 +847,28 @@ if ($env:VERSAT_IS_LOCAL -eq '1') {
   Restart-Computer -Force
   Write-Output "Orden de reinicio enviada al equipo local"
 } else {
+  $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $env:VERSAT_WIN_PASS -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($env:VERSAT_WIN_USER, $sec)
-  Restart-Computer -ComputerName $env:VERSAT_WIN_HOST -Credential $cred -Force
-  Write-Output "Orden de reinicio enviada a $env:VERSAT_WIN_HOST"
+  try {
+    Invoke-Command -ComputerName $target -Credential $cred -Authentication Negotiate -ScriptBlock { Restart-Computer -Force }
+    Write-Output "Orden de reinicio enviada a $target (WinRM)"
+  } catch {
+    $wsErr = $_.Exception.Message
+    try {
+      $dcomOpt = New-CimSessionOption -Protocol Dcom
+      $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+      try {
+        $os = Get-CimInstance -CimSession $cim -ClassName Win32_OperatingSystem
+        Invoke-CimMethod -InputObject $os -MethodName Win32Shutdown -Arguments @{ Flags = 6 } | Out-Null
+        Write-Output "Orden de reinicio enviada a $target (DCOM/WMI)"
+      } finally {
+        Remove-CimSession $cim -ErrorAction SilentlyContinue
+      }
+    } catch {
+      throw "Error WinRM ($wsErr) y DCOM ($($_.Exception.Message))"
+    }
+  }
 }
 "#;
 

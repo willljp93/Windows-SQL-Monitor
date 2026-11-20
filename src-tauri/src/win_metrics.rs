@@ -56,7 +56,28 @@ if ($env:VERSAT_IS_LOCAL -eq '1') {
   $target = $env:VERSAT_WIN_HOST
   $sec = ConvertTo-SecureString $pass -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($user, $sec)
-  $cim = New-CimSession -ComputerName $target -Credential $cred
+  $cim = $null
+  $wsErr = $null
+  try {
+    $cim = New-CimSession -ComputerName $target -Credential $cred -Authentication Negotiate
+  } catch {
+    $wsErr = $_.Exception.Message
+    try {
+      $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+      if ($isAdmin) {
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value $target -Concatenate -Force -ErrorAction Stop
+        $cim = New-CimSession -ComputerName $target -Credential $cred -Authentication Negotiate
+      }
+    } catch {}
+    if (-not $cim) {
+      try {
+        $dcomOpt = New-CimSessionOption -Protocol Dcom
+        $cim = New-CimSession -ComputerName $target -Credential $cred -SessionOption $dcomOpt
+      } catch {
+        throw "Error WinRM/CIM ($wsErr) y DCOM ($($_.Exception.Message)). Si estás fuera de dominio ejecuta como Administrador en esta PC: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '$target' -Concatenate -Force"
+      }
+    }
+  }
 }
 try {
   $os = Get-CimInstance -CimSession $cim -ClassName Win32_OperatingSystem

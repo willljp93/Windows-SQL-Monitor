@@ -1,6 +1,6 @@
-# Guía de compilación e instalador (.exe)
+# Guía de compilación e instaladores (.exe)
 
-## 1. Compilación local en Windows
+## 1. Compilación local en Windows (ambos instaladores)
 
 ### Requisitos previos
 1. **Rust (MSVC)**: descarga e instala desde [rustup.rs](https://rustup.rs/) eligiendo el toolchain `x86_64-pc-windows-msvc`.
@@ -10,15 +10,24 @@
    cargo install tauri-cli --version "^2.0"
    ```
 
-### Generar el instalador
+### Generar los instaladores
 Abre PowerShell en la carpeta raíz del proyecto y ejecuta:
 
 ```powershell
 .\build-installer.ps1
 ```
 
-El script limpia iconos antiguos, genera `icon.ico` y PNGs desde el icono seleccionado, compila en modo *release* optimizado y crea:
-`src-tauri\target\release\bundle\nsis\Windows-SQL Monitor_1.2.1_x64-setup.exe`
+El script limpia iconos antiguos, genera `icon.ico` y PNGs desde el icono seleccionado, compila en modo *release* optimizado y genera **ambos instaladores** en la carpeta `release-bundles\`:
+
+- `release-bundles\Windows-SQL-Monitor_1.2.0_x64-setup.exe` *(estándar ligero, ~5–8 MB)*
+- `release-bundles\Windows-SQL-Monitor_1.2.0_x64-offline-WebView2-setup.exe` *(100% offline con WebView2 incluido, ~135 MB)*
+
+Si en algún momento quieres generar solo una variante localmente, puedes usar el parámetro `-Mode`:
+
+```powershell
+.\build-installer.ps1 -Mode Standard
+.\build-installer.ps1 -Mode Offline
+```
 
 ---
 
@@ -29,71 +38,53 @@ El archivo [`.github/workflows/build-windows-exe.yml`](../.github/workflows/buil
 1. Compilar automáticamente al subir un *tag* `v*`:
    ```bash
    git add .
-   git commit -m "Release v1.2.1"
-   git tag v1.2.1
+   git commit -m "Release v1.2.0"
+   git tag v1.2.0
    git push origin main
-   git push origin v1.2.1
+   git push origin v1.2.0
    ```
 2. Permitir ejecución manual desde **Actions → Compilar Windows-SQL Monitor (.exe) → Run workflow**.
-3. Crear un **Release en borrador** en GitHub (`Windows-SQL Monitor v1.2.1`) con el instalador `.exe` adjunto.
+3. Compilar las dos variantes (`estándar` y `offline con WebView2` usando `src-tauri/tauri.offline.conf.json`) y crear un **Release en borrador** en GitHub (`Windows-SQL Monitor v1.2.0`) con **ambos archivos `.exe` adjuntos**.
 
-> Recuerda mantener sincronizado el número de versión del *tag* (por ejemplo `v1.2.1`) con `"version"` en `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`.
+> Recuerda mantener sincronizado el número de versión del *tag* (por ejemplo `v1.2.0`) con `"version"` en `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`.
 
 ---
 
-## 3. Cómo incluir WebView2 dentro del `.exe` (Instalación 100% sin Internet)
+## 3. Cómo funciona el instalador con WebView2 incluido (`tauri.offline.conf.json`)
 
-Por defecto, Tauri usa `downloadBootstrapper` en Windows: el instalador pesa pocos MB y, si el equipo destino no tiene **Microsoft Edge WebView2 Runtime** (por ejemplo, Windows 10 antiguo o un Windows Server aislado sin internet), intenta descargarlo durante la instalación.
-
-Si quieres instalar el `.exe` en PCs o servidores **sin acceso a Internet**, edita `src-tauri/tauri.conf.json` dentro de `bundle.windows`:
-
-### Opción A (Recomendada): `offlineInstaller`
-Incrusta el instalador offline oficial de Microsoft WebView2 dentro de tu `Setup.exe`.
+El proyecto ya incluye el archivo adicional [`src-tauri/tauri.offline.conf.json`](../src-tauri/tauri.offline.conf.json):
 
 ```json
-"windows": {
-  "webviewInstallMode": {
-    "type": "offlineInstaller"
-  },
-  "nsis": {
-    "languages": ["Spanish"],
-    "displayLanguageSelector": false,
-    "installMode": "currentUser",
-    "installerIcon": "icons/icon.ico"
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    }
   }
 }
 ```
 
-- **Ventaja:** instala WebView2 a nivel de sistema si hace falta, **sin usar Internet** en la PC destino.
-- **Tamaño:** el `.exe` pasa a pesar alrededor de **130–140 MB** (al compilar, la máquina que compila descarga una sola vez `MicrosoftEdgeWebview2RuntimeInstallerX64.exe`).
+Al ejecutar `cargo tauri build --bundles nsis --config src-tauri/tauri.offline.conf.json`, Tauri combina esa configuración con `src-tauri/tauri.conf.json`, reutiliza el binario Rust ya compilado y descarga una sola vez `MicrosoftEdgeWebview2RuntimeInstallerX64.exe` en la máquina que compila para incrustarlo dentro del `.exe`.
 
-### Opción B: `fixedRuntime` (100% portable, sin instalar WebView2 en el sistema)
-Empaqueta una carpeta fija del runtime de WebView2 junto a tu aplicación sin modificar el sistema operativo.
+### Alternativa `fixedRuntime` (100% portable, sin instalar WebView2 en el sistema)
+Si en un equipo muy restringido tampoco se permite ejecutar el instalador de WebView2:
 
-1. Descarga desde Microsoft el paquete **Fixed Version** (x64) de WebView2 (`.cab`) y extráelo en una carpeta, por ejemplo `src-tauri/webview2-fixed`.
-2. Configura `src-tauri/tauri.conf.json`:
+1. Descarga desde Microsoft el paquete **Fixed Version** (x64) de WebView2 (`.cab`) y extráelo en `src-tauri/webview2-fixed`.
+2. Sustituye `offlineInstaller` por:
    ```json
-   "windows": {
-     "webviewInstallMode": {
-       "type": "fixedRuntime",
-       "path": "./webview2-fixed"
-     },
-     "nsis": {
-       "languages": ["Spanish"],
-       "displayLanguageSelector": false,
-       "installMode": "currentUser",
-       "installerIcon": "icons/icon.ico"
-     }
+   "webviewInstallMode": {
+     "type": "fixedRuntime",
+     "path": "./webview2-fixed"
    }
    ```
-- **Tamaño:** añade ~180 MB al instalador y ~300+ MB descomprimidos.
-- **Uso ideal:** equipos muy bloqueados donde ni siquiera se permite ejecutar el instalador de WebView2.
 
 ### Comparativa rápida de modos
 
-| Modo | ¿Requiere Internet al instalar? | Tamaño extra aproximado |
+| Modo | ¿Requiere Internet al instalar? | Tamaño aproximado del `.exe` |
 | :--- | :--- | :--- |
-| `downloadBootstrapper` *(por defecto)* | Sí (solo si falta WebView2) | ~0 MB |
-| `embedBootstrapper` | Sí (solo si falta WebView2) | ~1.8 MB |
-| `offlineInstaller` | **No** | ~127 MB |
-| `fixedRuntime` | **No** | ~180 MB |
+| `downloadBootstrapper` *(Estándar)* | Sí (solo si falta WebView2) | ~5–8 MB |
+| `offlineInstaller` *(Offline WebView2)* | **No** | ~135 MB |
+| `fixedRuntime` *(Portable manual)* | **No** | ~185+ MB |

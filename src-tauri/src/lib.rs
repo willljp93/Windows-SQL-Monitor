@@ -22,6 +22,11 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 struct AppState(Arc<Mutex<SharedMonitorState>>);
 
 #[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[tauri::command]
 fn get_config(state: State<AppState>) -> MonitorConfig {
     state.0.lock().unwrap().config.clone()
 }
@@ -184,6 +189,7 @@ pub fn run() {
         ))
         .manage(AppState(shared_state.clone()))
         .invoke_handler(tauri::generate_handler![
+            get_app_version,
             get_config,
             get_paused,
             toggle_paused,
