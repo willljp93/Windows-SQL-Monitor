@@ -12,7 +12,7 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Write-Error "Rust/Cargo no detectado. Instala Rust desde https://rustup.rs/ y vuelve a intentarlo."
 }
 
-if (-not (cargo tauri --version 2>$null)) {
+if (-not (Get-Command cargo-tauri -ErrorAction SilentlyContinue)) {
     Write-Host "Instalando Tauri CLI..." -ForegroundColor Yellow
     cargo install tauri-cli --version "^2.0"
 }
