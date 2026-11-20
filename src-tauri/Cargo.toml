@@ -1,6 +1,6 @@
 [package]
 name = "windows-sql-monitor"
-version = "1.2.2"
+version = "1.2.0"
 description = "Windows-SQL Monitor: bandeja del sistema para Windows Server y SQL Server"
 authors = ["William Jiménez Puentes <willjp93@gmail.com>"]
 repository = "https://github.com/willljp93"
