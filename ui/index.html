@@ -629,6 +629,11 @@
       themeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
       localStorage.setItem('wsm-theme-mode', themeMode);
       applyThemeMode();
+      try {
+        if (window.__TAURI__ && window.__TAURI__.event) {
+          window.__TAURI__.event.emit('theme-changed', themeMode);
+        }
+      } catch (e) {}
     }
 
     function toggleSidebarHidden(hide) {
@@ -1424,6 +1429,21 @@
       } else {
         await controlSql(op.serviceName, op.action);
       }
+    }
+
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.listen('navigate-tab', function(ev) {
+        if (ev && ev.payload) {
+          switchTab(ev.payload);
+        }
+      });
+      window.__TAURI__.event.listen('probe-updated', async function() {
+        try {
+          isPaused = await invoke('get_paused');
+          updateHeaderAndSidebar();
+          await refreshHistory();
+        } catch (e) {}
+      });
     }
 
     loadConfig();

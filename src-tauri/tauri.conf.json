@@ -10,6 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Windows-SQL Monitor — Monitor de Windows Server y SQL Server",
         "width": 1220,
         "height": 820,
@@ -18,6 +19,18 @@
         "resizable": true,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "tray",
+        "title": "Windows-SQL Monitor · Bandeja",
+        "url": "tray.html",
+        "width": 310,
+        "height": 260,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false
       }
     ],
     "security": {

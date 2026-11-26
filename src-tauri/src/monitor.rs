@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Debug, Clone, Serialize)]
@@ -359,6 +359,7 @@ pub async fn execute_probe_cycle(
     };
 
     update_tray_visual(app, worst_tray, &tooltip_text);
+    let _ = app.emit("probe-updated", ());
 
     for (title, body) in alerts_to_send {
         let _ = app.notification().builder().title(title).body(body).show();
@@ -394,6 +395,7 @@ pub fn spawn_monitor_loop(app: AppHandle, state: Arc<Mutex<SharedMonitorState>>)
                 let _ = execute_probe_cycle(&app, &state, run_sql, run_res).await;
             } else {
                 update_tray_visual(&app, TrayVisualState::Paused, "Windows-SQL Monitor · En pausa");
+                let _ = app.emit("probe-updated", ());
             }
 
             tokio::time::sleep(Duration::from_secs(ping_secs)).await;

@@ -16,10 +16,29 @@ use admin_ops::{
 use config::{load_config, save_config, MonitorConfig};
 use monitor::{execute_probe_cycle, spawn_monitor_loop, ProbeSample, SharedMonitorState};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 struct AppState(Arc<Mutex<SharedMonitorState>>);
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TrayServerSummary {
+    id: String,
+    label: String,
+    host: String,
+    port: u16,
+    enabled: bool,
+    status: String,
+    status_text: String,
+    ping_text: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TraySnapshot {
+    paused: bool,
+    active_cpu_ram: String,
+    servers: Vec<TrayServerSummary>,
+}
 
 #[tauri::command]
 fn get_app_version() -> &'static str {
@@ -37,10 +56,100 @@ fn get_paused(state: State<AppState>) -> bool {
 }
 
 #[tauri::command]
-fn toggle_paused(state: State<AppState>) -> bool {
-    let mut guard = state.0.lock().unwrap();
-    guard.paused = !guard.paused;
-    guard.paused
+fn toggle_paused(app: AppHandle, state: State<AppState>) -> bool {
+    let paused = {
+        let mut guard = state.0.lock().unwrap();
+        guard.paused = !guard.paused;
+        guard.paused
+    };
+    let _ = app.emit("probe-updated", ());
+    paused
+}
+
+#[tauri::command]
+fn get_tray_snapshot(state: State<AppState>) -> TraySnapshot {
+    let guard = state.0.lock().unwrap();
+    let servers_list = guard.config.effective_servers();
+    let items: Vec<TrayServerSummary> = servers_list
+        .iter()
+        .map(|s| {
+            let latest = guard.latest_by_server.get(&s.id);
+            let status = if !s.enabled || guard.paused {
+                "muted".to_string()
+            } else {
+                latest.map(|l| l.status.clone()).unwrap_or_else(|| "muted".to_string())
+            };
+            let status_text = if !s.enabled {
+                "Deshabilitado".to_string()
+            } else if guard.paused {
+                "En pausa".to_string()
+            } else if let Some(l) = latest {
+                if l.sql_reachable {
+                    "SQL OK".to_string()
+                } else {
+                    "SQL Caído".to_string()
+                }
+            } else {
+                "Sin sondeos".to_string()
+            };
+            let ping_text = if !s.enabled || guard.paused {
+                String::new()
+            } else if let Some(l) = latest {
+                l.ping_latency_ms
+                    .map(|m| format!("{} ms", m))
+                    .unwrap_or_else(|| "Err".to_string())
+            } else {
+                "—".to_string()
+            };
+            TrayServerSummary {
+                id: s.id.clone(),
+                label: s.server_label.clone(),
+                host: s.host.clone(),
+                port: s.sql_port,
+                enabled: s.enabled,
+                status,
+                status_text,
+                ping_text,
+            }
+        })
+        .collect();
+
+    let active_cpu_ram = servers_list
+        .iter()
+        .find_map(|s| {
+            guard.latest_by_server.get(&s.id).and_then(|smp| {
+                smp.windows_resources.as_ref().map(|wr| {
+                    format!(
+                        "{}: CPU {:.0}% · RAM {:.0}%",
+                        s.server_label, wr.cpu_usage_percent, wr.ram_usage_percent
+                    )
+                })
+            })
+        })
+        .unwrap_or_default();
+
+    TraySnapshot {
+        paused: guard.paused,
+        active_cpu_ram,
+        servers: items,
+    }
+}
+
+#[tauri::command]
+fn cmd_open_main_tab(app: AppHandle, tab: String) {
+    if let Some(tray_win) = app.get_webview_window("tray") {
+        let _ = tray_win.hide();
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit("navigate-tab", tab);
+}
+
+#[tauri::command]
+fn cmd_quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -193,6 +302,9 @@ pub fn run() {
             get_config,
             get_paused,
             toggle_paused,
+            get_tray_snapshot,
+            cmd_open_main_tab,
+            cmd_quit_app,
             save_app_config,
             get_history,
             run_probe_now,
@@ -220,6 +332,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "tray" {
+                if let WindowEvent::Focused(false) = event {
+                    let _ = window.hide();
+                }
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state: State<AppState> = window.state();
                 let minimize = state.0.lock().unwrap().config.minimize_to_tray_on_close;

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const TRAY_BASE_PNG: &[u8] = include_bytes!("../icons/32x32.png");
 
@@ -13,6 +13,47 @@ pub enum TrayVisualState {
     Warning,
     Critical,
     Paused,
+}
+
+#[cfg(windows)]
+fn compute_tray_popup_pos(click_x: i32, click_y: i32, popup_w: i32, popup_h: i32) -> (i32, i32) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
+
+    let mut work = RECT {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1040,
+    };
+    unsafe {
+        let _ = SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut work as *mut RECT as *mut std::ffi::c_void,
+            0,
+        );
+    }
+
+    let min_x = work.left + 8;
+    let max_x = (work.right - popup_w - 8).max(min_x);
+    let min_y = work.top + 8;
+    let max_y = (work.bottom - popup_h - 8).max(min_y);
+
+    let px = (click_x - popup_w / 2).clamp(min_x, max_x);
+    let mid_y = work.top + (work.bottom - work.top) / 2;
+    let raw_y = if click_y >= mid_y {
+        (work.bottom - popup_h - 10).min(click_y - popup_h - 10)
+    } else {
+        (work.top + 10).max(click_y + 10)
+    };
+    let py = raw_y.clamp(min_y, max_y);
+    (px, py)
+}
+
+#[cfg(not(windows))]
+fn compute_tray_popup_pos(click_x: i32, click_y: i32, popup_w: i32, popup_h: i32) -> (i32, i32) {
+    ((click_x - popup_w / 2).max(8), (click_y - popup_h - 10).max(8))
 }
 
 pub fn render_tray_icon(state: TrayVisualState) -> Image<'static> {
@@ -100,6 +141,7 @@ pub fn setup_tray(app: &AppHandle, state: Arc<Mutex<SharedMonitorState>>) -> tau
     let menu = Menu::with_items(app, &[&open_item, &probe_item, &pause_item, &quit_item])?;
 
     let state_for_menu = state.clone();
+    let state_for_click = state;
     TrayIconBuilder::with_id("windows-sql-monitor-tray")
         .icon(render_tray_icon(TrayVisualState::Nominal))
         .tooltip(concat!("Windows-SQL Monitor v", env!("CARGO_PKG_VERSION"), " · Iniciando..."))
@@ -107,6 +149,9 @@ pub fn setup_tray(app: &AppHandle, state: Arc<Mutex<SharedMonitorState>>) -> tau
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => {
+                if let Some(tray_win) = app.get_webview_window("tray") {
+                    let _ = tray_win.hide();
+                }
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.set_focus();
@@ -120,27 +165,65 @@ pub fn setup_tray(app: &AppHandle, state: Arc<Mutex<SharedMonitorState>>) -> tau
                 });
             }
             "toggle_pause" => {
-                let mut guard = state_for_menu.lock().unwrap();
-                guard.paused = !guard.paused;
+                {
+                    let mut guard = state_for_menu.lock().unwrap();
+                    guard.paused = !guard.paused;
+                }
+                let _ = app.emit("probe-updated", ());
             }
             "quit" => {
                 app.exit(0);
             }
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
+        .on_tray_icon_event(move |tray, event| match event {
+            TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                position,
                 ..
-            } = event
-            {
+            } => {
                 let app = tray.app_handle();
+                if let Some(tray_win) = app.get_webview_window("tray") {
+                    if tray_win.is_visible().unwrap_or(false) {
+                        let _ = tray_win.hide();
+                    } else {
+                        let srv_count = state_for_click
+                            .lock()
+                            .unwrap()
+                            .config
+                            .effective_servers()
+                            .len()
+                            .clamp(1, 3);
+                        let logical_h = 204.0 + (srv_count as f64) * 46.0;
+                        let _ = tray_win.set_size(tauri::LogicalSize::new(310.0, logical_h));
+                        let scale = tray_win.scale_factor().unwrap_or(1.0).max(1.0);
+                        let pw = (310.0 * scale) as i32;
+                        let ph = (logical_h * scale) as i32;
+                        let (px, py) = compute_tray_popup_pos(position.x as i32, position.y as i32, pw, ph);
+                        let _ = tray_win.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(px, py),
+                        ));
+                        let _ = app.emit("tray-refresh", ());
+                        let _ = tray_win.show();
+                        let _ = tray_win.set_focus();
+                    }
+                }
+            }
+            TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => {
+                let app = tray.app_handle();
+                if let Some(tray_win) = app.get_webview_window("tray") {
+                    let _ = tray_win.hide();
+                }
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.set_focus();
                 }
             }
+            _ => {}
         })
         .build(app)?;
 
